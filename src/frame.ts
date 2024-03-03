@@ -2,6 +2,7 @@ import type { Matrix } from 'transformation-matrix'
 import {
   applyToPoint,
   compose,
+  inverse,
   rotate,
   rotateDEG,
   scale,
@@ -67,8 +68,24 @@ export class Frame {
     const [x10, y10] = applyToPoint(smoothMatrix(_matrixes), [_width, 0])
     const [x11, y11] = applyToPoint(smoothMatrix(_matrixes), [_width, _height])
 
-    const _nw = Math.round(Math.max(x00, x01, x10, x11) - Math.min(x00, x01, x10, x11))
-    const _nh = Math.round(Math.max(y00, y01, y10, y11) - Math.min(y00, y01, y10, y11))
+    const nw = Math.round(Math.max(x00, x01, x10, x11) - Math.min(x00, x01, x10, x11))
+    const nh = Math.round(Math.max(y00, y01, y10, y11) - Math.min(y00, y01, y10, y11))
+
+    const data: number[] = []
+
+    for (let x = 0; x < nw; x++) {
+      for (let y = 0; y < nh; y++) {
+        const [i, j] = applyToPoint(smoothMatrix(inverse(_matrixes)), [x, y])
+
+        const offset = Math.round((j * _width + i)) * 4
+
+        data.push(_data[offset], _data[offset + 1], _data[offset + 2], _data[offset + 3])
+      }
+    }
+
+    this._data = Uint8ClampedArray.from(data)
+    this._width = nw
+    this._height = nh
 
     return this
   }
