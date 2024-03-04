@@ -77,9 +77,31 @@ export class Frame {
       for (let y = 0; y < nh; y++) {
         const [i, j] = applyToPoint(smoothMatrix(inverse(_matrixes)), [x, y])
 
-        const offset = Math.round((j * _width + i)) * 4
+        const ix = Math.floor(i)
+        const iy = Math.floor(j)
 
-        data.push(_data[offset], _data[offset + 1], _data[offset + 2], _data[offset + 3])
+        // 权重
+        const u = i - ix
+        const v = j - iy
+
+        const u1 = 1 - u
+        const v1 = 1 - v
+
+        const offset = ((x * _width) + y) * 4
+
+        const rgba00 = getRGBA(this, iy + 0, ix + 0)
+        const rgba01 = getRGBA(this, iy + 0, ix + 1)
+        const rgba10 = getRGBA(this, iy + 1, ix + 0)
+        const rgba11 = getRGBA(this, iy + 1, ix + 1)
+
+        for (let i = 0; i <= 3; i += 1) {
+          const a = (rgba00[i] * u1) + (rgba01[i] * u)
+          const b = (rgba10[i] * u1) + (rgba11[i] * u)
+          const c = (a * v1) + (b * v)
+
+          // 向下取整
+          data[offset + i] = Math.floor(c)
+        }
       }
     }
 
@@ -101,4 +123,19 @@ export class Frame {
   ) {
     return new Frame(data, width, height)
   }
+}
+
+function getRGBA({ data, width, height }: Omit<ImageData, 'colorSpace'>, row: number, col: number) {
+  // 边界值处理
+  row = Math.max(0, Math.min(row, height - 1))
+  col = Math.max(0, Math.min(col, width - 1))
+
+  const offset = ((row * width) + col) * 4
+
+  return [
+    data[offset + 0],
+    data[offset + 1],
+    data[offset + 2],
+    data[offset + 3],
+  ]
 }
