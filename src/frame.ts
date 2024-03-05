@@ -41,7 +41,7 @@ export class Frame {
   ) {}
 
   scale(sx: number, sy?: number): Frame {
-    this._matrixes = compose(this._matrixes, scale(sx, sy, this._width / 2, this._height / 2))
+    this._matrixes = compose(this._matrixes, scale(sx, sy))
     return this
   }
 
@@ -73,9 +73,13 @@ export class Frame {
 
     const data: number[] = []
 
-    for (let x = 0; x < nw; x++) {
-      for (let y = 0; y < nh; y++) {
-        const [i, j] = applyToPoint(smoothMatrix(inverse(_matrixes)), [x, y])
+    for (let y = 0; y < nh; y++) {
+      for (let x = 0; x < nw; x++) {
+        // +0.5 是参考网上的插值优化方式
+        let [i, j] = applyToPoint(smoothMatrix(inverse(_matrixes)), [x + 0.5, y + 0.5])
+
+        i = Math.min(i - 0.5, _width - 1)
+        j = Math.min(j - 0.5, _height - 1)
 
         const ix = Math.floor(i)
         const iy = Math.floor(j)
@@ -86,8 +90,6 @@ export class Frame {
 
         const u1 = 1 - u
         const v1 = 1 - v
-
-        const offset = ((x * _width) + y) * 4
 
         const rgba00 = getRGBA(this, iy + 0, ix + 0)
         const rgba01 = getRGBA(this, iy + 0, ix + 1)
@@ -100,7 +102,7 @@ export class Frame {
           const c = (a * v1) + (b * v)
 
           // 向下取整
-          data[offset + i] = Math.floor(c)
+          data.push(Math.floor(c))
         }
       }
     }
