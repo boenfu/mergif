@@ -32,7 +32,7 @@ export class Frame {
     return this._height
   }
 
-  private _matrixes: Matrix = INIT_MATRIX
+  private _matrix: Matrix = INIT_MATRIX
 
   constructor(
     private _data: Uint8ClampedArray,
@@ -41,45 +41,50 @@ export class Frame {
   ) {}
 
   scale(sx: number, sy?: number): Frame {
-    this._matrixes = compose(this._matrixes, scale(sx, sy))
+    this._matrix = compose(this._matrix, scale(sx, sy, this._width / 2, this._height / 2))
     return this
   }
 
   rotate(angle: number): Frame {
-    this._matrixes = compose(this._matrixes, rotate(angle, this._width / 2, this._height / 2))
+    this._matrix = compose(this._matrix, rotate(angle, this._width / 2, this._height / 2))
     return this
   }
 
   rotateDEG(angle: number): Frame {
-    this._matrixes = compose(this._matrixes, rotateDEG(angle, this._width / 2, this._height / 2))
+    this._matrix = compose(this._matrix, rotateDEG(angle, this._width / 2, this._height / 2))
     return this
   }
 
   translate(tx: number, ty?: number): Frame {
-    this._matrixes = compose(this._matrixes, translate(tx, ty))
+    this._matrix = compose(this._matrix, translate(tx, ty))
     return this
   }
 
   apply(): Frame {
-    const { _matrixes, _data, _width, _height } = this
+    const { _matrix, width, height } = this
 
-    const [x00, y00] = applyToPoint(smoothMatrix(_matrixes), [0, 0])
-    const [x01, y01] = applyToPoint(smoothMatrix(_matrixes), [0, _height])
-    const [x10, y10] = applyToPoint(smoothMatrix(_matrixes), [_width, 0])
-    const [x11, y11] = applyToPoint(smoothMatrix(_matrixes), [_width, _height])
+    const matrix = smoothMatrix(_matrix)
 
-    const nw = Math.round(Math.max(x00, x01, x10, x11) - Math.min(x00, x01, x10, x11))
-    const nh = Math.round(Math.max(y00, y01, y10, y11) - Math.min(y00, y01, y10, y11))
+    const [x00, y00] = applyToPoint(matrix, [0, 0])
+    const [x01, y01] = applyToPoint(matrix, [0, height])
+    const [x10, y10] = applyToPoint(matrix, [width, 0])
+    const [x11, y11] = applyToPoint(matrix, [width, height])
+
+    const newX = Math.min(x00, x01, x10, x11)
+    const newY = Math.min(y00, y01, y10, y11)
+    const newWidth = Math.round(Math.max(x00, x01, x10, x11) - Math.min(x00, x01, x10, x11))
+    const newHeight = Math.round(Math.max(y00, y01, y10, y11) - Math.min(y00, y01, y10, y11))
+
+    const inverseMatrix = smoothMatrix(inverse(matrix))
 
     const data: number[] = []
 
-    for (let y = 0; y < nh; y++) {
-      for (let x = 0; x < nw; x++) {
-        // +0.5 是参考网上的插值优化方式
-        let [i, j] = applyToPoint(smoothMatrix(inverse(_matrixes)), [x + 0.5, y + 0.5])
+    for (let row = 0; row < newHeight; row++) {
+      for (let col = 0; col < newWidth; col++) {
+        const x = newX + col
+        const y = newY + row
 
-        i = Math.min(i - 0.5, _width - 1)
-        j = Math.min(j - 0.5, _height - 1)
+        const [i, j] = applyToPoint(inverseMatrix, [x, y])
 
         const ix = Math.floor(i)
         const iy = Math.floor(j)
@@ -108,8 +113,9 @@ export class Frame {
     }
 
     this._data = Uint8ClampedArray.from(data)
-    this._width = nw
-    this._height = nh
+    this._width = newWidth
+    this._height = newHeight
+    this._matrix = INIT_MATRIX
 
     return this
   }
