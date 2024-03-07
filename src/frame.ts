@@ -2,12 +2,13 @@ import type { Matrix } from 'transformation-matrix'
 import {
   applyToPoint,
   compose,
+  flipX,
+  flipY,
   inverse,
   rotate,
   rotateDEG,
   scale,
   smoothMatrix,
-  translate,
 } from 'transformation-matrix'
 
 const INIT_MATRIX = {
@@ -45,6 +46,16 @@ export class Frame {
     return this
   }
 
+  flipX(): Frame {
+    this._matrix = compose(this._matrix, flipX())
+    return this
+  }
+
+  flipY(): Frame {
+    this._matrix = compose(this._matrix, flipY())
+    return this
+  }
+
   rotate(angle: number): Frame {
     this._matrix = compose(this._matrix, rotate(angle, this._width / 2, this._height / 2))
     return this
@@ -52,11 +63,6 @@ export class Frame {
 
   rotateDEG(angle: number): Frame {
     this._matrix = compose(this._matrix, rotateDEG(angle, this._width / 2, this._height / 2))
-    return this
-  }
-
-  translate(tx: number, ty?: number): Frame {
-    this._matrix = compose(this._matrix, translate(tx, ty))
     return this
   }
 
@@ -86,29 +92,8 @@ export class Frame {
 
         const [i, j] = applyToPoint(inverseMatrix, [x, y])
 
-        const ix = Math.floor(i)
-        const iy = Math.floor(j)
-
-        // 权重
-        const u = i - ix
-        const v = j - iy
-
-        const u1 = 1 - u
-        const v1 = 1 - v
-
-        const rgba00 = getRGBA(this, iy + 0, ix + 0)
-        const rgba01 = getRGBA(this, iy + 0, ix + 1)
-        const rgba10 = getRGBA(this, iy + 1, ix + 0)
-        const rgba11 = getRGBA(this, iy + 1, ix + 1)
-
-        for (let i = 0; i <= 3; i += 1) {
-          const a = (rgba00[i] * u1) + (rgba01[i] * u)
-          const b = (rgba10[i] * u1) + (rgba11[i] * u)
-          const c = (a * v1) + (b * v)
-
-          // 向下取整
-          data.push(Math.floor(c))
-        }
+        // 最近邻插值
+        data.push(...getRGBA(this, Math.round(j), Math.round(i)))
       }
     }
 
