@@ -69,6 +69,9 @@ export class Frame {
   apply(): Frame {
     const { _matrix, width, height } = this
 
+    if (this._matrix === INIT_MATRIX)
+      return this
+
     const matrix = smoothMatrix(_matrix)
 
     const [x00, y00] = applyToPoint(matrix, [0, 0])
@@ -114,6 +117,62 @@ export class Frame {
     width: number,
     height: number = Math.floor(data.length / 4 / width),
   ) {
+    return new Frame(data, width, height)
+  }
+
+  static fromRectangle(width: number, height: number, fill: number | [number, number, number, number] = 0) {
+    const length = width * height * 4
+    const data = new Uint8ClampedArray(length)
+
+    const color = Array.isArray(fill) ? fill : [fill, fill, fill, 1]
+
+    for (let i = 0; i < length; i++)
+      data[i] = color[i % color.length]
+
+    return new Frame(data, width, height)
+  }
+
+  static clone(
+    frame: Frame,
+  ) {
+    return new Frame(new Uint8ClampedArray(frame.data), frame.width, frame.height)
+  }
+
+  static merge(...[source, ...frames]: [{
+    frame: Frame
+  }, ...{
+    frame: Frame
+    x?: number
+    y?: number
+    transparent?: number[]
+  }[]]) {
+    const { width, height, data: _data } = source.frame.apply()
+    const data = new Uint8ClampedArray(_data)
+
+    for (let { frame, x = 0, y = 0, transparent = [0, 0, 0, 0] } of frames) {
+      frame = frame.apply()
+
+      const offset = (y * width + x)
+
+      const rw = Math.min(x + frame.width, width) - x
+      const rh = Math.min(y + frame.height, height) - y
+
+      for (let j = 0; j < rh; j++) {
+        for (let i = 0; i < rw; i++) {
+          const z = (offset + j * width + i) * 4
+          const z2 = (j * frame.width + i) * 4
+
+          if (frame.data[z2] === transparent[0] && frame.data[z2 + 1] === transparent[1] && frame.data[z2 + 2] === transparent[2] && frame.data[z2 + 3] === transparent[3])
+            continue
+
+          data[z] = frame.data[z2]
+          data[z + 1] = frame.data[z2 + 1]
+          data[z + 2] = frame.data[z2 + 2]
+          data[z + 3] = frame.data[z2 + 3]
+        }
+      }
+    }
+
     return new Frame(data, width, height)
   }
 }
