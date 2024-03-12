@@ -108,6 +108,18 @@ export class Frame {
     return this
   }
 
+  clone(): Frame {
+    return Frame.clone(this)
+  }
+
+  merge(frame: Frame, params: { x?: number, y?: number, transparent?: number[] }): Frame {
+    return Frame.merge({ frame: this }, { frame, ...params })
+  }
+
+  exec(fn: (_this: Frame) => void | Frame): Frame {
+    return fn(this) || this
+  }
+
   static fromImageData(data: ImageData): Frame {
     return new Frame(data.data, data.width, data.height)
   }
@@ -135,6 +147,7 @@ export class Frame {
   static clone(
     frame: Frame,
   ) {
+    frame = frame.apply()
     return new Frame(new Uint8ClampedArray(frame.data), frame.width, frame.height)
   }
 
@@ -146,35 +159,39 @@ export class Frame {
     y?: number
     transparent?: number[]
   }[]]) {
-    const { width, height, data: _data } = source.frame.apply()
-    const data = new Uint8ClampedArray(_data)
+    const { width: sourceWidth, height: sourceHeight, data: _sourceData } = source.frame.apply()
+    const sourceData = new Uint8ClampedArray(_sourceData)
 
-    for (let { frame, x = 0, y = 0, transparent = [0, 0, 0, 0] } of frames) {
-      frame = frame.apply()
+    for (const { frame, x = 0, y = 0, transparent } of frames) {
+      const { width, height, data } = frame.apply()
 
-      const offset = (y * width + x)
+      const offset = (y * sourceWidth + x)
 
-      const rw = Math.min(x + frame.width, width) - x
-      const rh = Math.min(y + frame.height, height) - y
+      const rw = Math.min(x + width, sourceWidth) - x
+      const rh = Math.min(y + height, sourceHeight) - y
 
       for (let j = 0; j < rh; j++) {
         for (let i = 0; i < rw; i++) {
-          const z = (offset + j * width + i) * 4
-          const z2 = (j * frame.width + i) * 4
+          const index = (offset + j * sourceWidth + i) * 4
+          const rgba = getRGBA({ width, height, data }, j, i)
 
-          if (frame.data[z2] === transparent[0] && frame.data[z2 + 1] === transparent[1] && frame.data[z2 + 2] === transparent[2] && frame.data[z2 + 3] === transparent[3])
+          if (transparent && isEqual(rgba, transparent))
             continue
 
-          data[z] = frame.data[z2]
-          data[z + 1] = frame.data[z2 + 1]
-          data[z + 2] = frame.data[z2 + 2]
-          data[z + 3] = frame.data[z2 + 3]
+          sourceData[index] = rgba[0]
+          sourceData[index + 1] = rgba[1]
+          sourceData[index + 2] = rgba[2]
+          sourceData[index + 3] = rgba[3]
         }
       }
     }
 
-    return new Frame(data, width, height)
+    return new Frame(sourceData, sourceWidth, sourceHeight)
   }
+}
+
+function isEqual(c1: number[], c2: number[]) {
+  return c1[0] === c2[0] && c1[1] === c2[1] && c1[2] === c2[2] && c1[3] === c2[3]
 }
 
 function getRGBA({ data, width, height }: Omit<ImageData, 'colorSpace'>, row: number, col: number) {
