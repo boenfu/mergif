@@ -1,6 +1,9 @@
-import type { Frame, GifBinary } from 'omggif'
-import { GifReader } from 'omggif'
+import type { GifBinary } from 'omggif'
+import { GifReader, GifWriter } from 'omggif'
 import EventEmitter from 'eventemitter3'
+import fileDownload from 'js-file-download'
+
+import { Frame } from '../src/frame'
 
 export interface GIFMergeItem {
   id: number
@@ -108,7 +111,50 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
   }
 
   async generateGIF() {
+    const canvas = this.canvas
+    if (!canvas)
+      return
 
+    const { width, height } = canvas
+    const items = this.items.sort((itemA, itemB) => itemA.zIndex - itemB.zIndex)
+
+    const buf: number[] = []
+    const gf = new GifWriter(buf, width, height, {})
+
+    for (let frameIndex = 0; frameIndex < 20; frameIndex++) {
+      let source = Frame.fromRectangle(width, height)
+
+      for (const { reader, left, top, scaleX, scaleY, angle } of items) {
+        const frameData = new Uint8ClampedArray(reader.width * reader.height * 4)
+        reader.decodeAndBlitFrameRGBA(frameIndex, frameData)
+
+        const frame = Frame.fromFrameRGBA(frameData, reader.width, reader.height).scale(scaleX, scaleY).rotateDEG(angle).apply()
+        source = source.merge(frame, { x: left, y: top })
+      }
+
+      const indexed_pixels: number[] = []
+      const pam = new Map<number, number>()
+
+      for (let index = 0; index <= source.data.length; index += 1) {
+        const color
+        = (source.data[index * 4] << 16)
+        | (source.data[index * 4 + 1] << 8)
+        | source.data[index * 4 + 2]
+
+        if (!pam.has(color))
+          pam.set(color, pam.size)
+
+        indexed_pixels.push(pam.get(color)!)
+      }
+
+      gf.addFrame(0, 0, source.width, source.height, indexed_pixels, {
+        delay: 10,
+        transparent: 0,
+        palette: [...pam.keys()].concat(Array(256).fill(0)).slice(0, 256),
+      })
+    }
+
+    fileDownload(Uint8ClampedArray.from(buf), 'test.gif')
   }
 
   private handleCanvasCreate() {

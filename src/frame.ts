@@ -162,7 +162,10 @@ export class Frame {
     const { width: sourceWidth, height: sourceHeight, data: _sourceData } = source.frame.apply()
     const sourceData = new Uint8ClampedArray(_sourceData)
 
-    for (const { frame, x = 0, y = 0, transparent } of frames) {
+    for (let { frame, x = 0, y = 0, transparent } of frames) {
+      x = Math.round(x)
+      y = Math.round(y)
+
       const { width, height, data } = frame.apply()
 
       const offset = (y * sourceWidth + x)
