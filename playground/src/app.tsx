@@ -77,9 +77,13 @@ export function App() {
           multiple
           onChange={(event) => {
             merger.reset()
-            Promise.all(Array.from(event.target.files!).map(item => item.arrayBuffer())).then((list) => {
+            Promise.all(Array.from(event.target.files!).map(item => item.arrayBuffer().then(data => ({
+              type: item.type,
+              label: item.name,
+              binary: new Uint8Array(data),
+            })))).then((list) => {
               merger.once('canvasChange', setCanvas)
-              merger.append(...list.map(item => new Uint8Array(item)))
+              merger.append(...list)
             })
           }}
         />

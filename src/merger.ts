@@ -1,4 +1,4 @@
-import type { GifBinary } from 'omggif'
+import type { Frame as FrameInfo, GifBinary } from 'omggif'
 import { GifReader, GifWriter } from 'omggif'
 import EventEmitter from 'eventemitter3'
 import fileDownload from 'js-file-download'
@@ -6,6 +6,8 @@ import fileDownload from 'js-file-download'
 import { Frame } from '../src/frame'
 
 export interface GIFMergeItem {
+  // MIME type image/gif|jpeg
+  type: string
   id: number
   label?: string
   binary: GifBinary
@@ -39,7 +41,7 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
 
   canvas: GIFMergerCanvas | undefined
 
-  constructor(gifList?: GifBinary[]) {
+  constructor(gifList?: (Pick<GIFMergeItem, 'type' | 'binary'> & Partial<GIFMergeItem>)[]) {
     super()
 
     if (gifList)
@@ -48,13 +50,13 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
     this.handleCanvasCreate()
   }
 
-  append(...gifList: GifBinary[]) {
+  append(...gifList: (Pick<GIFMergeItem, 'type' | 'binary'> & Partial<GIFMergeItem>)[]) {
     if (!gifList.length)
       return
 
     const startZIndex = Math.max(...this.items.map(({ zIndex }) => zIndex), 0)
 
-    for (const binary of gifList) {
+    for (const { binary, ...item } of gifList) {
       const id = this.idGenerator
       const reader = new GifReader(binary)
 
@@ -70,6 +72,7 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
         angle: 0,
         zIndex: startZIndex + 1,
         reader,
+        ...item,
       })
     }
 
@@ -98,7 +101,7 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
     this.emit('change', this.items)
   }
 
-  getFirstFrame(id: number): Frame & { data: Uint8ClampedArray } | undefined {
+  getFirstFrame(id: number): FrameInfo & { data: Uint8ClampedArray } | undefined {
     const reader = this._itemsMap.get(id)?.reader
 
     if (!reader)
@@ -121,15 +124,30 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
     const buf: number[] = []
     const gf = new GifWriter(buf, width, height, {})
 
-    for (let frameIndex = 0; frameIndex < 20; frameIndex++) {
+    for (let frameIndex = 0; frameIndex < 10; frameIndex++) {
       let source = Frame.fromRectangle(width, height)
 
-      for (const { reader, left, top, scaleX, scaleY, angle } of items) {
+      for (const { reader, left, top, scaleX, scaleY, angle, binary } of items) {
         const frameData = new Uint8ClampedArray(reader.width * reader.height * 4)
+        const { palette_offset, transparent_index } = reader.frameInfo(frameIndex)
+
+        const transparentOffset = (palette_offset ?? 0) + (transparent_index ?? 0) * 3
+
+        const transparentColor = [
+          binary[transparentOffset],
+          binary[transparentOffset + 1],
+          binary[transparentOffset + 2],
+        ]
+
         reader.decodeAndBlitFrameRGBA(frameIndex, frameData)
 
         const frame = Frame.fromFrameRGBA(frameData, reader.width, reader.height).scale(scaleX, scaleY).rotateDEG(angle).apply()
-        source = source.merge(frame, { x: left, y: top })
+
+        source = source.merge(frame, {
+          x: left,
+          y: top,
+          transparent: transparentColor,
+        })
       }
 
       const indexed_pixels: number[] = []
