@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { fabric } from 'fabric'
+import fileDownload from 'js-file-download'
+
 import type { GIFMergerCanvas } from '../../src'
 import { GIFMerger } from '../../src'
 
@@ -75,6 +77,7 @@ export function App() {
         <input
           type="file"
           multiple
+          accept="image/gif"
           onChange={(event) => {
             merger.reset()
             Promise.all(Array.from(event.target.files!).map(item => item.arrayBuffer().then(data => ({
@@ -88,6 +91,15 @@ export function App() {
           }}
         />
       </section>
+      <button onClick={() => {
+        const gif = merger.generateGIF()
+
+        if (gif)
+          fileDownload(gif, `${new Date().toLocaleString()}.gif`)
+      }}
+      >
+        生成
+      </button>
     </div>
   )
 }

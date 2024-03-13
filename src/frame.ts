@@ -112,7 +112,11 @@ export class Frame {
     return Frame.clone(this)
   }
 
-  merge(frame: Frame, params: { x?: number, y?: number, transparent?: number[] }): Frame {
+  merge(frame: Frame, params: {
+    x?: number
+    y?: number
+    transparent?: number[]
+  } = {}): Frame {
     return Frame.merge({ frame: this }, { frame, ...params })
   }
 

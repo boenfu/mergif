@@ -1,12 +1,11 @@
 import type { Frame as FrameInfo, GifBinary } from 'omggif'
 import { GifReader, GifWriter } from 'omggif'
 import EventEmitter from 'eventemitter3'
-import fileDownload from 'js-file-download'
 
 import { Frame } from '../src/frame'
 
 export interface GIFMergeItem {
-  // MIME type image/gif|jpeg
+  // MIME type image/gif
   type: string
   id: number
   label?: string
@@ -19,6 +18,20 @@ export interface GIFMergeItem {
   scaleY: number
   angle: number
   zIndex: number
+  /**
+   * @unit 10 ms
+   */
+  offsetTime: number
+  /**
+   * @unit 10 ms
+   */
+  totalTime: number
+  /**
+   * 自身播放完成后是否循环
+   * true: 循环
+   * false: 停在最后一帧
+   */
+  loop: boolean
   reader: GifReader
 }
 
@@ -72,6 +85,9 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
         angle: 0,
         zIndex: startZIndex + 1,
         reader,
+        offsetTime: 0,
+        totalTime: reader.numFrames() * reader.frameInfo(0).delay,
+        loop: false,
         ...item,
       })
     }
@@ -113,35 +129,83 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
     return { ...reader.frameInfo(0), data: frameData }
   }
 
-  async generateGIF() {
+  async generateGIF(): Uint8ClampedArray | undefined {
     const canvas = this.canvas
+
     if (!canvas)
       return
 
     const { width, height } = canvas
     const items = this.items.sort((itemA, itemB) => itemA.zIndex - itemB.zIndex)
 
-    const buf: number[] = []
-    const gf = new GifWriter(buf, width, height, {})
+    const imageData: number[] = []
+    const gf = new GifWriter(imageData, width, height, {})
 
-    for (let frameIndex = 0; frameIndex < 10; frameIndex++) {
+    // 取最晚结束的作为总时间
+    const totalTime = Math.max(...items.map(item => item.offsetTime + item.totalTime))
+    // 取最小的延迟作为新图片延迟
+    const delayTime = Math.min(...items.map(item => item.reader.frameInfo(0).delay))
+
+    const disposalSet = new Set(items.map(item => item.reader.frameInfo(0).disposal))
+    const isSameDisposal = disposalSet.size === 1
+    const disposal = isSameDisposal ? [...disposalSet][0] : 2
+
+    let currentTime = 0
+
+    const lastFrameMap = new Map<number, Frame>()
+
+    while (currentTime <= totalTime) {
       let source = Frame.fromRectangle(width, height)
 
-      for (const { reader, left, top, scaleX, scaleY, angle, binary } of items) {
-        const frameData = new Uint8ClampedArray(reader.width * reader.height * 4)
-        const { palette_offset, transparent_index } = reader.frameInfo(frameIndex)
+      let transparent!: number | null
+
+      for (const { id, reader, left, top, scaleX, scaleY, angle, binary, loop, offsetTime } of items) {
+        if (currentTime < offsetTime)
+          continue
+
+        let frameIndex = Math.round((currentTime - offsetTime) / reader.frameInfo(0).delay)
+
+        if (loop)
+          frameIndex = frameIndex % reader.numFrames()
+        else
+          frameIndex = Math.min(frameIndex, reader.numFrames() - 1)
+
+        const { disposal, palette_offset, transparent_index } = reader.frameInfo(frameIndex)
+
+        if (typeof transparent === 'undefined')
+          transparent = transparent_index
+
+        // TODO(boen): interlaced
 
         const transparentOffset = (palette_offset ?? 0) + (transparent_index ?? 0) * 3
-
         const transparentColor = [
           binary[transparentOffset],
           binary[transparentOffset + 1],
           binary[transparentOffset + 2],
         ]
 
+        const frameData = new Uint8ClampedArray(reader.width * reader.height * 4)
         reader.decodeAndBlitFrameRGBA(frameIndex, frameData)
 
-        const frame = Frame.fromFrameRGBA(frameData, reader.width, reader.height).scale(scaleX, scaleY).rotateDEG(angle).apply()
+        const frame = Frame
+          .fromFrameRGBA(frameData, reader.width, reader.height)
+          .exec((frame) => {
+            if (isSameDisposal || disposal !== 1)
+              return frame
+
+            if (lastFrameMap.has(id)) {
+              frame = lastFrameMap.get(id)!.merge(frame, {
+                transparent: transparentColor,
+              })
+            }
+
+            lastFrameMap.set(id, frame.clone())
+
+            return frame
+          })
+          .scale(scaleX, scaleY)
+          .rotateDEG(angle)
+          .apply()
 
         source = source.merge(frame, {
           x: left,
@@ -166,13 +230,16 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
       }
 
       gf.addFrame(0, 0, source.width, source.height, indexed_pixels, {
-        delay: 10,
-        transparent: 0,
+        delay: delayTime,
+        transparent: transparent ?? undefined,
+        disposal,
         palette: [...pam.keys()].concat(Array(256).fill(0)).slice(0, 256),
       })
+
+      currentTime += delayTime
     }
 
-    fileDownload(Uint8ClampedArray.from(buf), 'test.gif')
+    return Uint8ClampedArray.from(imageData)
   }
 
   private handleCanvasCreate() {
