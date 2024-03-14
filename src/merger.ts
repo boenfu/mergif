@@ -2,7 +2,7 @@ import type { Frame as FrameInfo, GifBinary } from 'omggif'
 import { GifReader, GifWriter } from 'omggif'
 import EventEmitter from 'eventemitter3'
 
-import { Frame } from '../src/frame'
+import { Frame } from './frame'
 
 export interface GIFMergeItem {
   // MIME type image/gif
@@ -129,7 +129,7 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
     return { ...reader.frameInfo(0), data: frameData }
   }
 
-  async generateGIF(): Uint8ClampedArray | undefined {
+  async generateGIF(): Promise<Uint8ClampedArray | undefined> {
     const canvas = this.canvas
 
     if (!canvas)

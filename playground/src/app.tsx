@@ -92,10 +92,9 @@ export function App() {
         />
       </section>
       <button onClick={() => {
-        const gif = merger.generateGIF()
-
-        if (gif)
-          fileDownload(gif, `${new Date().toLocaleString()}.gif`)
+        merger.generateGIF().then(gif =>
+          gif && fileDownload(gif, `${new Date().toLocaleString()}.gif`),
+        )
       }}
       >
         生成
