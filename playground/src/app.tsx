@@ -36,6 +36,8 @@ export function App() {
           width: item.width,
           height: item.height,
           angle: item.angle,
+          centeredRotation: true,
+          centeredScaling: true,
         }))
       }
     })
@@ -46,7 +48,8 @@ export function App() {
       if (!elem)
         return
 
-      const { left, top, scaleX, scaleY, angle } = elem
+      const { scaleX, scaleY, angle } = elem
+      const { left, top } = elem.getBoundingRect()
 
       merger.modify(elem.data, {
         left,
