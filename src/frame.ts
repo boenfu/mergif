@@ -36,7 +36,7 @@ export class Frame {
   private _matrix: Matrix = INIT_MATRIX
 
   constructor(
-    private _data: Uint8ClampedArray,
+    private _data: number[],
     private _width: number,
     private _height: number,
   ) {}
@@ -100,7 +100,7 @@ export class Frame {
       }
     }
 
-    this._data = Uint8ClampedArray.from(data)
+    this._data = data
     this._width = newWidth
     this._height = newHeight
     this._matrix = INIT_MATRIX
@@ -125,22 +125,22 @@ export class Frame {
   }
 
   static fromImageData(data: ImageData): Frame {
-    return new Frame(data.data, data.width, data.height)
+    return new Frame([...data.data], data.width, data.height)
   }
 
   static fromFrameRGBA(
-    data: Uint8ClampedArray,
+    data: Uint8ClampedArray | number[],
     width: number,
     height: number = Math.floor(data.length / 4 / width),
   ) {
-    return new Frame(data, width, height)
+    return new Frame([...data], width, height)
   }
 
-  static fromRectangle(width: number, height: number, fill: number | [number, number, number, number] = 0) {
+  static fromRectangle(width: number, height: number, fill: number | [number, number, number] = 0) {
     const length = width * height * 4
-    const data = new Uint8ClampedArray(length)
+    const data: number[] = []
 
-    const color = Array.isArray(fill) ? fill : [fill, fill, fill, 1]
+    const color = Array.isArray(fill) ? fill : [fill, fill, fill]
 
     for (let i = 0; i < length; i++)
       data[i] = color[i % color.length]
@@ -152,7 +152,7 @@ export class Frame {
     frame: Frame,
   ) {
     frame = frame.apply()
-    return new Frame(new Uint8ClampedArray(frame.data), frame.width, frame.height)
+    return new Frame([...frame.data], frame.width, frame.height)
   }
 
   static merge(...[source, ...frames]: [{
@@ -164,7 +164,7 @@ export class Frame {
     transparent?: number[]
   }[]]) {
     const { width: sourceWidth, height: sourceHeight, data: _sourceData } = source.frame.apply()
-    const sourceData = new Uint8ClampedArray(_sourceData)
+    const sourceData = [..._sourceData]
 
     for (let { frame, x = 0, y = 0, transparent } of frames) {
       x = Math.round(x)
@@ -201,7 +201,11 @@ function isEqual(c1: number[], c2: number[]) {
   return c1[0] === c2[0] && c1[1] === c2[1] && c1[2] === c2[2]
 }
 
-function getRGBA({ data, width, height }: Omit<ImageData, 'colorSpace'>, row: number, col: number) {
+function getRGBA({ data, width, height }: {
+  data: number[]
+  width: number
+  height: number
+}, row: number, col: number) {
   // 边界值处理
   row = Math.max(0, Math.min(row, height - 1))
   col = Math.max(0, Math.min(col, width - 1))

@@ -146,20 +146,15 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
     // 取最小的延迟作为新图片延迟
     const delayTime = Math.min(...items.map(item => item.reader.frameInfo(0).delay))
 
-    const disposalSet = new Set(items.map(item => item.reader.frameInfo(0).disposal))
-    const isSameDisposal = disposalSet.size === 1
-    const disposal = isSameDisposal ? [...disposalSet][0] : 2
-
     let currentTime = 0
 
     const lastFrameMap = new Map<number, Frame>()
 
     while (currentTime <= totalTime) {
-      let source = Frame.fromRectangle(width, height)
+      let source = Frame.fromRectangle(width, height, [-1, -1, -1])
 
-      let transparent!: number | null
-
-      for (const { id, reader, left, top, scaleX, scaleY, angle, binary, loop, offsetTime } of items) {
+      for (const item of items) {
+        const { id, reader, left, top, scaleX, scaleY, angle, loop, offsetTime } = item
         if (currentTime < offsetTime)
           continue
 
@@ -170,19 +165,11 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
         else
           frameIndex = Math.min(frameIndex, reader.numFrames() - 1)
 
-        const { disposal, palette_offset, transparent_index } = reader.frameInfo(frameIndex)
-
-        if (typeof transparent === 'undefined')
-          transparent = transparent_index
+        const { disposal } = reader.frameInfo(frameIndex)
 
         // TODO(boen): interlaced
 
-        const transparentOffset = (palette_offset ?? 0) + (transparent_index ?? 0) * 3
-        const transparentColor = [
-          binary[transparentOffset],
-          binary[transparentOffset + 1],
-          binary[transparentOffset + 2],
-        ]
+        const transparentColor = getTransparent(item)
 
         const frameData = new Uint8ClampedArray(reader.width * reader.height * 4)
         reader.decodeAndBlitFrameRGBA(frameIndex, frameData)
@@ -190,7 +177,7 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
         const frame = Frame
           .fromFrameRGBA(frameData, reader.width, reader.height)
           .exec((frame) => {
-            if (isSameDisposal || disposal !== 1)
+            if (disposal !== 1)
               return frame
 
             if (lastFrameMap.has(id)) {
@@ -215,25 +202,32 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
       }
 
       const indexed_pixels: number[] = []
-      const pam = new Map<number, number>()
+      const paletteMap = new Map<number, number>()
 
       for (let index = 0; index <= source.data.length; index += 1) {
-        const color
-        = (source.data[index * 4] << 16)
-        | (source.data[index * 4 + 1] << 8)
-        | source.data[index * 4 + 2]
+        const color = colorNumber([source.data[index * 4], source.data[index * 4 + 1], source.data[index * 4 + 2]])
 
-        if (!pam.has(color))
-          pam.set(color, pam.size)
+        if (!paletteMap.has(color))
+          paletteMap.set(color, paletteMap.size)
 
-        indexed_pixels.push(pam.get(color)!)
+        indexed_pixels.push(paletteMap.get(color)!)
       }
+
+      const transparentIndex = paletteMap.get(-1)
+
+      const palette = [
+        ...paletteMap.keys(),
+      ].concat(Array(256).fill(0)).slice(0, 256)
+
+      if (typeof transparentIndex !== 'undefined')
+
+        palette.splice(transparentIndex, 1, 0)
 
       gf.addFrame(0, 0, source.width, source.height, indexed_pixels, {
         delay: delayTime,
-        transparent: transparent ?? undefined,
-        disposal,
-        palette: [...pam.keys()].concat(Array(256).fill(0)).slice(0, 256),
+        transparent: transparentIndex,
+        disposal: 2,
+        palette,
       })
 
       currentTime += delayTime
@@ -263,4 +257,22 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
       this.emit('canvasChange', this.canvas)
     })
   }
+}
+
+function colorNumber(color: number[]): number {
+  return color[0] << 16 | color[1] << 8 | color[2]
+}
+
+function getTransparent(item: GIFMergeItem): [number, number, number] | undefined {
+  const { palette_offset, transparent_index } = item.reader.frameInfo(0)
+
+  const transparentOffset = (palette_offset ?? 0) + (transparent_index ?? 0) * 3
+
+  return typeof transparent_index === 'number'
+    ? [
+        item.binary[transparentOffset],
+        item.binary[transparentOffset + 1],
+        item.binary[transparentOffset + 2],
+      ]
+    : undefined
 }
