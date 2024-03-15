@@ -88,6 +88,7 @@ export function App() {
               label: item.name,
               binary: new Uint8Array(data),
             })))).then((list) => {
+              Reflect.set(window, 'cache', list)
               merger.once('canvasChange', setCanvas)
               merger.append(...list)
             })
@@ -101,6 +102,19 @@ export function App() {
       }}
       >
         生成
+      </button>
+
+      <button onClick={() => {
+        const cache = Reflect.get(window, 'cache')
+
+        if (cache) {
+          merger.reset()
+          merger.once('canvasChange', setCanvas)
+          merger.append(...cache)
+        }
+      }}
+      >
+        复用
       </button>
     </div>
   )

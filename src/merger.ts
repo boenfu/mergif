@@ -167,50 +167,57 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
 
         const { disposal } = reader.frameInfo(frameIndex)
 
-        // TODO(boen): interlaced
-
-        const transparentColor = getTransparent(item)
+        const transparentColor = getTransparent(item, frameIndex)
 
         const frameData = new Uint8ClampedArray(reader.width * reader.height * 4)
         reader.decodeAndBlitFrameRGBA(frameIndex, frameData)
 
-        const frame = Frame
-          .fromFrameRGBA(frameData, reader.width, reader.height)
-          .exec((frame) => {
-            if (disposal !== 1)
+        source = source.merge(
+          Frame
+            .fromFrameRGBA(frameData, reader.width, reader.height)
+            .exec((frame) => {
+              const lastFrame = lastFrameMap.get(id)
+
+              if (lastFrame)
+                frame = lastFrame.merge(frame, { transparent: transparentColor })
+
+              switch (disposal) {
+                case 1:
+                  lastFrameMap.set(id, frame.clone())
+                  break
+                case 2:
+                  lastFrameMap.delete(id)
+                  break
+                default:
+                  break
+              }
+
               return frame
-
-            if (lastFrameMap.has(id)) {
-              frame = lastFrameMap.get(id)!.merge(frame, {
-                transparent: transparentColor,
-              })
-            }
-
-            lastFrameMap.set(id, frame.clone())
-
-            return frame
-          })
-          .scale(scaleX, scaleY)
-          .rotateDEG(angle)
-          .apply()
-
-        source = source.merge(frame, {
-          x: left,
-          y: top,
-          transparent: transparentColor,
-        })
+            })
+            .scale(scaleX, scaleY)
+            .rotateDEG(angle),
+          {
+            x: left,
+            y: top,
+            transparent: transparentColor,
+          },
+        )
       }
 
-      const indexed_pixels: number[] = []
+      const indexedPixels: number[] = []
       const paletteMap = new Map<number, number>()
 
-      for (let index = 0; index <= source.data.length; index += 1) {
-        const color = colorNumber([source.data[index * 4], source.data[index * 4 + 1], source.data[index * 4 + 2]])
+      for (let index = 0; index <= source.data.length; index += 4) {
+        const color = colorNumber([
+          source.data[index],
+          source.data[index + 1],
+          source.data[index + 2],
+        ])
 
         if (!paletteMap.has(color))
           paletteMap.set(color, paletteMap.size)
 
-        indexed_pixels.push(paletteMap.get(color)!)
+        indexedPixels.push(paletteMap.get(color)!)
       }
 
       const transparentIndex = paletteMap.get(-1)
@@ -223,7 +230,7 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
 
         palette.splice(transparentIndex, 1, 0)
 
-      gf.addFrame(0, 0, source.width, source.height, indexed_pixels, {
+      gf.addFrame(0, 0, source.width, source.height, indexedPixels, {
         delay: delayTime,
         transparent: transparentIndex,
         disposal: 2,
@@ -263,8 +270,8 @@ function colorNumber(color: number[]): number {
   return color[0] << 16 | color[1] << 8 | color[2]
 }
 
-function getTransparent(item: GIFMergeItem): [number, number, number] | undefined {
-  const { palette_offset, transparent_index } = item.reader.frameInfo(0)
+function getTransparent(item: GIFMergeItem, frame = 0): [number, number, number] | undefined {
+  const { palette_offset, transparent_index } = item.reader.frameInfo(frame)
 
   const transparentOffset = (palette_offset ?? 0) + (transparent_index ?? 0) * 3
 

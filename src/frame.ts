@@ -137,13 +137,13 @@ export class Frame {
   }
 
   static fromRectangle(width: number, height: number, fill: number | [number, number, number] = 0) {
-    const length = width * height * 4
+    const size = width * height
     const data: number[] = []
 
     const color = Array.isArray(fill) ? fill : [fill, fill, fill]
 
-    for (let i = 0; i < length; i++)
-      data[i] = color[i % color.length]
+    for (let i = 0; i < size; i += 1)
+      data.push(...color, 255)
 
     return new Frame(data, width, height)
   }
