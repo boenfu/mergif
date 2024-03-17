@@ -8,7 +8,7 @@ export interface GIFMergeItem {
   // MIME type image/gif
   type: string
   id: number
-  label?: string
+  label: string
   binary: GifBinary
   left: number
   top: number
@@ -33,6 +33,7 @@ export interface GIFMergeItem {
    */
   loop: boolean
   reader: GifReader
+  visible: boolean
 }
 
 export interface GIFMergerEvents {
@@ -69,12 +70,15 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
 
     const startZIndex = Math.max(...this.items.map(({ zIndex }) => zIndex), 0)
 
+    let zIndex = startZIndex + 1
+
     for (const { binary, ...item } of gifList) {
       const id = this.idGenerator
       const reader = new GifReader(binary)
 
       this._itemsMap.set(id, {
         id,
+        label: '',
         binary,
         left: 0,
         top: 0,
@@ -83,11 +87,12 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
         scaleX: 1,
         scaleY: 1,
         angle: 0,
-        zIndex: startZIndex + 1,
+        zIndex: zIndex++,
         reader,
         offsetTime: 0,
         totalTime: reader.numFrames() * reader.frameInfo(0).delay,
         loop: false,
+        visible: true,
         ...item,
       })
     }
@@ -103,17 +108,73 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
     this.emit('change', this.items)
   }
 
-  reset() {
-    this._itemsMap.clear()
-    this.canvas = undefined
-    this.emit('change', this.items)
-  }
-
   modify(id: number, data: Partial<GIFMergeItem>) {
     if (!this._itemsMap.has(id))
       return
 
     this._itemsMap.set(id, { ...this._itemsMap.get(id)!, ...data })
+    this.emit('change', this.items)
+  }
+
+  reset(id: number) {
+    const item = this._itemsMap.get(id)
+
+    if (!item)
+      return
+
+    const reader = item.reader
+
+    this.modify(id, {
+      id,
+      left: 0,
+      top: 0,
+      scaleX: 1,
+      scaleY: 1,
+      angle: 0,
+      offsetTime: 0,
+      totalTime: reader.numFrames() * reader.frameInfo(0).delay,
+      visible: true,
+    })
+  }
+
+  resetAll() {
+    this._itemsMap.clear()
+    this.canvas = undefined
+    this.emit('change', this.items)
+  }
+
+  changeZIndex(id: number, offset: number | 'top' | 'bottom') {
+    const item = this._itemsMap.get(id)
+
+    if (!item)
+      return
+
+    const originItems = [...this.items].sort((itemA, itemB) => itemA.zIndex - itemB.zIndex)
+    const nextItems = [...originItems]
+
+    let targetItemIndex!: number
+
+    const itemIndex = originItems.findIndex(item => item.id === id)
+
+    switch (offset) {
+      case 'top':
+        targetItemIndex = originItems.length - 1
+        break
+      case 'bottom':
+        targetItemIndex = 0
+        break
+      default:
+        targetItemIndex = Math.min(originItems.length - 1, Math.max(0, itemIndex + offset))
+        break
+    }
+
+    if (itemIndex === targetItemIndex)
+      return
+
+    nextItems.splice(targetItemIndex, 0, ...nextItems.splice(itemIndex, 1))
+    const originItemsIndex = originItems.map(item => item.zIndex)
+    nextItems.forEach((item, index) => item.zIndex = originItemsIndex[index])
+
     this.emit('change', this.items)
   }
 
@@ -136,7 +197,9 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
       return
 
     const { width, height } = canvas
-    const items = this.items.sort((itemA, itemB) => itemA.zIndex - itemB.zIndex)
+    const items = [...this.items]
+      .sort((itemA, itemB) => itemA.zIndex - itemB.zIndex)
+      .filter(item => item.visible)
 
     const imageData: number[] = []
     const gf = new GifWriter(imageData, width, height, {})
