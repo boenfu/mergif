@@ -21,11 +21,11 @@ export interface GIFMergeItem {
   /**
    * @unit 10 ms
    */
-  offsetTime: number
+  start: number
   /**
    * @unit 10 ms
    */
-  totalTime: number
+  duration: number
   /**
    * 自身播放完成后是否循环
    * true: 循环
@@ -39,6 +39,7 @@ export interface GIFMergeItem {
 export interface GIFMergerEvents {
   change: (items: GIFMergeItem[]) => void
   canvasChange: (canvas: GIFMergerCanvas) => void
+  durationChange: (duration: number) => void
 }
 
 export interface GIFMergerCanvas {
@@ -53,6 +54,9 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
   private _itemsMap: Map<number, GIFMergeItem> = new Map()
   get items() { return [...this._itemsMap.values()] }
 
+  private _duration = 0
+  get duration() { return this._duration }
+
   canvas: GIFMergerCanvas | undefined
 
   constructor(gifList?: (Pick<GIFMergeItem, 'type' | 'binary'> & Partial<GIFMergeItem>)[]) {
@@ -62,6 +66,7 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
       this.append(...gifList)
 
     this.handleCanvasCreate()
+    this.handleDuration()
   }
 
   append(...gifList: (Pick<GIFMergeItem, 'type' | 'binary'> & Partial<GIFMergeItem>)[]) {
@@ -89,8 +94,8 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
         angle: 0,
         zIndex: zIndex++,
         reader,
-        offsetTime: 0,
-        totalTime: reader.numFrames() * reader.frameInfo(0).delay,
+        start: 0,
+        duration: countDuration(reader),
         loop: false,
         visible: true,
         ...item,
@@ -131,8 +136,8 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
       scaleX: 1,
       scaleY: 1,
       angle: 0,
-      offsetTime: 0,
-      totalTime: reader.numFrames() * reader.frameInfo(0).delay,
+      start: 0,
+      duration: countDuration(reader),
       visible: true,
     })
   }
@@ -205,28 +210,49 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
     const gf = new GifWriter(imageData, width, height, {})
 
     // 取最晚结束的作为总时间
-    const totalTime = Math.max(...items.map(item => item.offsetTime + item.totalTime))
-    // 取最小的延迟作为新图片延迟
-    const delayTime = Math.min(...items.map(item => item.reader.frameInfo(0).delay))
+    const duration = Math.max(...items.map(item => item.start + item.duration))
+    // 24 FPS ?
+    const delayTime = 4
 
     let currentTime = 0
 
     const lastFrameMap = new Map<number, Frame>()
+    const lastFrameDurationMap = new Map<number, [number, number]>() // frameIndex, delayCount>()
 
-    while (currentTime <= totalTime) {
+    while (currentTime <= duration) {
       let source = Frame.fromRectangle(width, height, [-1, -1, -1])
 
       for (const item of items) {
-        const { id, reader, left, top, scaleX, scaleY, angle, loop, offsetTime } = item
-        if (currentTime < offsetTime)
+        const { id, reader, left, top, scaleX, scaleY, angle, loop, start } = item
+        // TODO (boen): 自定义结束处置方式
+        // || currentTime > start + duration
+        if (currentTime < start)
           continue
 
-        let frameIndex = Math.round((currentTime - offsetTime) / reader.frameInfo(0).delay)
+        let [lastFrameIndex, durationCount] = lastFrameDurationMap.get(id) || [0, reader.frameInfo(0).delay]
+
+        const totalFrames = reader.numFrames()
+
+        let frameIndex = lastFrameIndex
+
+        // 上一帧时间不够了，找下一帧
+        if (currentTime > durationCount) {
+          let restTime = currentTime - durationCount
+
+          while (restTime > 0) {
+            const nextFrameDuration = reader.frameInfo(++frameIndex % totalFrames).delay
+
+            restTime -= nextFrameDuration
+            durationCount += nextFrameDuration
+          }
+
+          lastFrameDurationMap.set(id, [frameIndex, durationCount])
+        }
 
         if (loop)
-          frameIndex = frameIndex % reader.numFrames()
+          frameIndex = frameIndex % totalFrames
         else
-          frameIndex = Math.min(frameIndex, reader.numFrames() - 1)
+          frameIndex = Math.min(frameIndex, totalFrames - 1)
 
         const { disposal } = reader.frameInfo(frameIndex)
 
@@ -327,6 +353,17 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
       this.emit('canvasChange', this.canvas)
     })
   }
+
+  private handleDuration() {
+    this.on('change', (items) => {
+      const duration = Math.max(this._duration, ...items.map(item => item.start + item.duration))
+
+      if (duration !== this._duration) {
+        this._duration = duration
+        this.emit('durationChange', duration)
+      }
+    })
+  }
 }
 
 function colorNumber(color: number[]): number {
@@ -345,4 +382,8 @@ function getTransparent(item: GIFMergeItem, frame = 0): [number, number, number]
         item.binary[transparentOffset + 2],
       ]
     : undefined
+}
+
+function countDuration(reader: GifReader): number {
+  return Array(reader.numFrames()).fill(0).reduce((c, _, i) => c + reader.frameInfo(i).delay, 0)
 }

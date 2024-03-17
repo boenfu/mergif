@@ -1,4 +1,4 @@
-import { Avatar, Box, Button, Card, Flex, Grid, IconButton, Slider, Table } from '@radix-ui/themes'
+import { Avatar, Box, Button, Card, Flex, Grid, IconButton, Slider, Table, Text, TextField } from '@radix-ui/themes'
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -33,6 +33,14 @@ export function App() {
   const fileRef = useRef<HTMLInputElement>(null)
   const [_, rerender] = useReducer<any>(() => ({}), {})
   const [colorScheme, setColorScheme] = usePreferredColorScheme()
+
+  const [totalDuration, setTotalDuration] = useState(0)
+
+  useEffect(() => {
+    merger.on('durationChange', setTotalDuration)
+    return () =>
+      void merger.off('durationChange', setTotalDuration)
+  }, [])
 
   useEffect(() => {
     if (!canvas)
@@ -227,8 +235,51 @@ export function App() {
                         style={{
                           '--accent-9': rgbString(item.label),
                         } as any}
-                        defaultValue={[25, 75]}
+                        min={0}
+                        max={totalDuration}
+                        key={`${item.start},${item.duration}`}
+                        step={1}
+                        defaultValue={[item.start, item.start + item.duration]}
+                        onValueCommit={([start, end]) => {
+                          merger.modify(item.id, {
+                            start,
+                            duration: end - start,
+                          })
+                          rerender()
+                        }}
                       />
+                      <Flex gap="2" p="2" align="center">
+                        <Text as="label">Start:</Text>
+                        <TextField.Input
+                          type="number"
+                          size="1"
+                          placeholder="ms"
+                          step={10}
+                          key={item.start}
+                          defaultValue={item.start * 10}
+                          onBlur={(e) => {
+                            merger.modify(item.id, {
+                              start: Math.round(Number(e.target.value) / 10),
+                            })
+                            rerender()
+                          }}
+                        />
+                        <Text as="label">Duration:</Text>
+                        <TextField.Input
+                          type="number"
+                          size="1"
+                          placeholder="ms"
+                          step={10}
+                          key={item.duration}
+                          defaultValue={item.duration * 10}
+                          onBlur={(e) => {
+                            merger.modify(item.id, {
+                              duration: Math.round(Number(e.target.value) / 10),
+                            })
+                            rerender()
+                          }}
+                        />
+                      </Flex>
                     </Table.Cell>
                     <Table.Cell>
                       <Flex direction="column" gap="2">
