@@ -38,7 +38,9 @@ export interface GIFMergeItem {
 
 export interface GIFMergerEvents {
   change: (items: GIFMergeItem[]) => void
-  canvasChange: (canvas: GIFMergerCanvas) => void
+  itemsCreated: (items: GIFMergeItem[]) => void
+  canvasCreated: (canvas: GIFMergerCanvas) => void
+  canvasUpdate: (canvas: GIFMergerCanvas) => void
   durationChange: (duration: number) => void
 }
 
@@ -77,6 +79,8 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
 
     let zIndex = startZIndex + 1
 
+    const items: GIFMergeItem[] = []
+
     for (const { binary, ...item } of gifList) {
       const id = this.idGenerator
       const reader = new GifReader(binary)
@@ -100,8 +104,11 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
         visible: true,
         ...item,
       })
+
+      items.push(this._itemsMap.get(id)!)
     }
 
+    this.emit('itemsCreated', items)
     this.emit('change', this.items)
   }
 
@@ -193,6 +200,14 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
     reader.decodeAndBlitFrameRGBA(0, frameData)
 
     return { ...reader.frameInfo(0), data: frameData }
+  }
+
+  updateCanvas(canvas: GIFMergerCanvas) {
+    if (!this.canvas)
+      return
+
+    this.canvas = canvas
+    this.emit('canvasUpdate', canvas)
   }
 
   async generateGIF(): Promise<Uint8ClampedArray | undefined> {
@@ -350,7 +365,7 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
         height: maxHeight,
       }
 
-      this.emit('canvasChange', this.canvas)
+      this.emit('canvasCreated', this.canvas)
     })
   }
 

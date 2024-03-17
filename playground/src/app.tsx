@@ -16,7 +16,7 @@ import {
   TrashIcon,
 } from '@radix-ui/react-icons'
 import { rgbString } from '@boenfu/text-rgb'
-import { useEffect, useReducer, useRef, useState } from 'react'
+import { useEffect, useId, useReducer, useRef, useState } from 'react'
 import { fabric } from 'fabric'
 import fileDownload from 'js-file-download'
 
@@ -28,13 +28,17 @@ import { usePreferredColorScheme } from './theme-provider'
 const merger = new GIFMerger()
 
 export function App() {
+  const editorId = useId()
   const [canvas, setCanvas] = useState<GIFMergerCanvas>()
   const editorRef = useRef<fabric.Canvas>()
+  const thumbnailRef = useRef<Record<number, any>>({})
   const fileRef = useRef<HTMLInputElement>(null)
   const [_, rerender] = useReducer<any>(() => ({}), {})
   const [colorScheme, setColorScheme] = usePreferredColorScheme()
 
   const [totalDuration, setTotalDuration] = useState(0)
+
+  const canvasReady = Boolean(canvas)
 
   useEffect(() => {
     merger.on('durationChange', setTotalDuration)
@@ -43,33 +47,10 @@ export function App() {
   }, [])
 
   useEffect(() => {
-    if (!canvas)
-      return () => {}
+    if (!canvasReady)
+      return
 
-    const editor = new fabric.Canvas('editor');
-
-    [...merger.items].sort((itemA, itemB) => itemA.zIndex - itemB.zIndex).forEach((item) => {
-      const itemCanvas = document.createElement('canvas')
-      itemCanvas.width = item.width
-      itemCanvas.height = item.height
-
-      const frame = merger.getFirstFrame(item.id)
-
-      if (frame) {
-        itemCanvas.getContext('2d')?.putImageData(new ImageData(frame.data, frame.width, frame.height), 0, 0)
-        editor.add(new fabric.Image(itemCanvas, {
-          data: item.id,
-          name: item.label,
-          left: item.left,
-          top: item.top,
-          width: item.width,
-          height: item.height,
-          angle: item.angle,
-          centeredRotation: true,
-          centeredScaling: true,
-        }))
-      }
-    })
+    const editor = new fabric.Canvas(editorId)
 
     editor.on('object:modified', (e) => {
       const elem = e.target
@@ -94,8 +75,62 @@ export function App() {
 
     editorRef.current = editor
 
-    return () => editor.dispose()
-  }, [canvas])
+    return () => void editor.dispose()
+  }, [canvasReady, editorId])
+
+  useEffect(() => {
+    if (!canvasReady)
+      return
+
+    const handler = (items: GIFMergeItem[]) => {
+      const editor = editorRef.current
+
+      if (!editor)
+        return
+
+      const existedSet = new Set(editor.getObjects().map(item => item.data));
+
+      [...items].sort((itemA, itemB) => itemA.zIndex - itemB.zIndex).forEach((item) => {
+        if (existedSet.has(item.id))
+          return
+
+        const itemCanvas = document.createElement('canvas')
+        itemCanvas.width = item.width
+        itemCanvas.height = item.height
+
+        const frame = merger.getFirstFrame(item.id)
+
+        if (frame) {
+          itemCanvas.getContext('2d')?.putImageData(new ImageData(frame.data, frame.width, frame.height), 0, 0)
+          thumbnailRef.current[item.id] = itemCanvas.toDataURL()
+
+          editor.add(new fabric.Image(itemCanvas, {
+            data: item.id,
+            name: item.label,
+            left: item.left,
+            top: item.top,
+            width: item.width,
+            height: item.height,
+            angle: item.angle,
+            centeredRotation: true,
+            centeredScaling: true,
+          }))
+        }
+      })
+
+      rerender()
+    }
+
+    handler(merger.items)
+
+    merger.on('itemsCreated', handler)
+    merger.on('canvasUpdate', (canvas) => {
+      setCanvas(canvas)
+      editorRef.current?.setDimensions(canvas).requestRenderAll()
+    })
+
+    return () => void merger.off('itemsCreated', handler)
+  }, [canvasReady])
 
   return (
     <Grid>
@@ -133,13 +168,52 @@ export function App() {
             } as any}
           >
             <canvas
-              id="editor"
+              id={editorId}
               width={canvas?.width}
               height={canvas?.height}
               style={{ border: '1px dash ' }}
             />
           </Card>
-          <Flex gap="3">
+          <Flex gap="3" align="center">
+            <Flex gap="2" p="2" align="center">
+              <TextField.Input
+                disabled={!canvasReady}
+                type="number"
+                size="2"
+                style={{ width: 64 }}
+                placeholder="width"
+                min={0}
+                max={1024}
+                step={1}
+                key={`w:${merger.canvas?.width}`}
+                defaultValue={merger.canvas?.width}
+                onBlur={(e) => {
+                  merger.updateCanvas({
+                    width: Number(e.target.value) || merger.canvas?.width || 100,
+                    height: merger.canvas?.height ?? 0,
+                  })
+                }}
+              />
+              <Text as="label">x</Text>
+              <TextField.Input
+                disabled={!canvasReady}
+                type="number"
+                size="2"
+                style={{ width: 64 }}
+                placeholder="height"
+                min={0}
+                max={1024}
+                step={1}
+                key={`h:${merger.canvas?.width}`}
+                defaultValue={merger.canvas?.height}
+                onBlur={(e) => {
+                  merger.updateCanvas({
+                    width: merger.canvas?.width ?? 0,
+                    height: Number(e.target.value) || merger.canvas?.height || 100,
+                  })
+                }}
+              />
+            </Flex>
             <Button
               variant="soft"
               onClick={() => fileRef.current?.click()}
@@ -154,21 +228,23 @@ export function App() {
               multiple
               accept="image/gif"
               onChange={(event) => {
-                merger.resetAll()
                 Promise.all(Array.from(event.target.files!).map(item => item.arrayBuffer().then(data => ({
                   type: item.type,
                   label: item.name,
                   binary: new Uint8Array(data),
                 })))).then((list) => {
-                  Reflect.set(window, 'cache', list)
-                  merger.once('canvasChange', setCanvas)
+                  if (import.meta.env.DEV)
+                    Reflect.set(window, 'cache', list)
+
+                  merger.once('canvasCreated', setCanvas)
                   merger.append(...list)
+                  rerender()
                 })
               }}
             />
             <Button
               variant="soft"
-              disabled={!merger.items.length}
+              disabled={!merger.items.filter(item => item.visible).length}
               onClick={() => {
                 merger.generateGIF().then(gif =>
                   gif && fileDownload(gif, `${new Date().toLocaleString()}.gif`),
@@ -179,24 +255,25 @@ export function App() {
               Download
             </Button>
             {
-              import.meta.env.DEV
-                && (
-                  <Button
-                    variant="classic"
-                    onClick={() => {
-                      const cache = Reflect.get(window, 'cache')
+              (import.meta.env.DEV && localStorage.getItem('DEV'))
+              && (
+                <Button
+                  variant="classic"
+                  onClick={() => {
+                    const cache = Reflect.get(window, 'cache')
 
-                      if (cache) {
-                        merger.resetAll()
-                        merger.once('canvasChange', setCanvas)
-                        merger.append(...cache)
-                      }
-                    }}
-                  >
-                    复用
-                  </Button>
-                )
+                    if (cache) {
+                      merger.resetAll()
+                      merger.once('canvasCreated', setCanvas)
+                      merger.append(...cache)
+                    }
+                  }}
+                >
+                  复用
+                </Button>
+              )
             }
+
           </Flex>
         </Flex>
       </Box>
@@ -226,7 +303,7 @@ export function App() {
                   <Table.Row key={item.id} align="center">
                     <Table.RowHeaderCell>
                       <Flex gap="2" align="center">
-                        <Avatar src="" fallback={index} />
+                        <Avatar src={thumbnailRef.current[item.id]} fallback={index} />
                         {item.label}
                       </Flex>
                     </Table.RowHeaderCell>
@@ -255,7 +332,7 @@ export function App() {
                           size="1"
                           placeholder="ms"
                           step={10}
-                          key={item.start}
+                          key={`s:${item.start}`}
                           defaultValue={item.start * 10}
                           onBlur={(e) => {
                             merger.modify(item.id, {
@@ -270,7 +347,7 @@ export function App() {
                           size="1"
                           placeholder="ms"
                           step={10}
-                          key={item.duration}
+                          key={`d:${item.duration}`}
                           defaultValue={item.duration * 10}
                           onBlur={(e) => {
                             merger.modify(item.id, {
