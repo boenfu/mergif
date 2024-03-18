@@ -222,7 +222,7 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
       .filter(item => item.visible)
 
     const imageData: number[] = []
-    const gf = new GifWriter(imageData, width, height, {})
+    const frames: Parameters<GifWriter['addFrame']>[] = []
 
     // 取最晚结束的作为总时间
     const duration = Math.max(...items.map(item => item.start + item.duration))
@@ -233,6 +233,7 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
 
     const lastFrameMap = new Map<number, Frame>()
     const lastFrameDurationMap = new Map<number, [number, number]>() // frameIndex, delayCount>()
+    const paletteMap = new Map<number, number>()
 
     while (currentTime <= duration) {
       let source = Frame.fromRectangle(width, height, [-1, -1, -1])
@@ -309,7 +310,6 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
       }
 
       const indexedPixels: number[] = []
-      const paletteMap = new Map<number, number>()
 
       for (let index = 0; index <= source.data.length; index += 4) {
         const color = colorNumber([
@@ -326,23 +326,29 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
 
       const transparentIndex = paletteMap.get(-1)
 
-      const palette = [
-        ...paletteMap.keys(),
-      ].concat(Array(256).fill(0)).slice(0, 256)
-
-      if (typeof transparentIndex !== 'undefined')
-
-        palette.splice(transparentIndex, 1, 0)
-
-      gf.addFrame(0, 0, source.width, source.height, indexedPixels, {
+      frames.push([0, 0, source.width, source.height, indexedPixels, {
         delay: delayTime,
         transparent: transparentIndex,
         disposal: 2,
-        palette,
-      })
+      }])
 
       currentTime += delayTime
     }
+
+    const palette = [
+      ...paletteMap.keys(),
+    ].concat(Array(256).fill(0)).slice(0, 256)
+
+    const transparentIndex = paletteMap.get(-1)
+    if (typeof transparentIndex !== 'undefined')
+
+      palette.splice(transparentIndex, 1, 0)
+
+    const gifWriter = new GifWriter(imageData, width, height, {
+      palette,
+    })
+
+    frames.forEach(params => gifWriter.addFrame(...params))
 
     return Uint8ClampedArray.from(imageData)
   }
