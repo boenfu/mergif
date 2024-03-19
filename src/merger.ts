@@ -235,15 +235,16 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
     const lastFrameDurationMap = new Map<number, [number, number]>() // frameIndex, delayCount>()
     const paletteMap = new Map<number, number>()
 
+    let lastFrameIndexList: (undefined | number)[]
+
     while (currentTime <= duration) {
       let source = Frame.fromRectangle(width, height, [-1, -1, -1])
 
-      for (const item of items) {
-        const { id, reader, left, top, scaleX, scaleY, angle, loop, start } = item
+      const frameIndexList = items.map((item) => {
+        const { id, reader, loop, start } = item
         // TODO (boen): 自定义结束处置方式
-        // || currentTime > start + duration
         if (currentTime < start)
-          continue
+          return undefined
 
         let [lastFrameIndex, durationCount] = lastFrameDurationMap.get(id) || [0, reader.frameInfo(0).delay]
 
@@ -269,6 +270,30 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
           frameIndex = frameIndex % totalFrames
         else
           frameIndex = Math.min(frameIndex, totalFrames - 1)
+
+        return frameIndex
+      })
+
+      if (frameIndexList.every((item, index) => item === lastFrameIndexList?.[index])) {
+        const lastFrameOptions = frames[frames.length - 1]?.[5]
+
+        if (lastFrameOptions)
+          lastFrameOptions.delay! += delayTime
+
+        continue
+      }
+      else {
+        lastFrameIndexList = frameIndexList
+      }
+
+      for (let i = 0; i < items.length; i++) {
+        const frameIndex = frameIndexList[i]
+
+        if (typeof frameIndex === 'undefined')
+          continue
+
+        const item = items[i]
+        const { id, reader, left, top, scaleX, scaleY, angle } = item
 
         const { disposal } = reader.frameInfo(frameIndex)
 
@@ -350,7 +375,7 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
 
     frames.forEach(params => gifWriter.addFrame(...params))
 
-    return Uint8ClampedArray.from(imageData)
+    return Uint8ClampedArray.from(imageData.slice(0, gifWriter.end()))
   }
 
   private handleCanvasCreate() {
