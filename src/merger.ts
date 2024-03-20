@@ -3,6 +3,7 @@ import { GifReader, GifWriter } from 'omggif'
 import EventEmitter from 'eventemitter3'
 
 import { Frame } from './frame'
+import { breakable } from './@utils'
 
 export interface GIFMergeItem {
   // MIME type image/gif
@@ -211,171 +212,177 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
   }
 
   async generateGIF(): Promise<Uint8ClampedArray | undefined> {
-    const canvas = this.canvas
+    return breakable(async (idle) => {
+      const canvas = this.canvas
 
-    if (!canvas)
-      return
+      if (!canvas)
+        return
 
-    const { width, height } = canvas
-    const items = [...this.items]
-      .sort((itemA, itemB) => itemA.zIndex - itemB.zIndex)
-      .filter(item => item.visible)
+      const { width, height } = canvas
+      const items = [...this.items]
+        .sort((itemA, itemB) => itemA.zIndex - itemB.zIndex)
+        .filter(item => item.visible)
 
-    const imageData: number[] = []
-    const frames: Parameters<GifWriter['addFrame']>[] = []
+      const imageData: number[] = []
+      const frames: Parameters<GifWriter['addFrame']>[] = []
 
-    // 取最晚结束的作为总时间
-    const duration = Math.max(...items.map(item => item.start + item.duration))
-    // 24 FPS ?
-    const delayTime = 4
+      // 取最晚结束的作为总时间
+      const duration = Math.max(...items.map(item => item.start + item.duration))
+      // 24 FPS ?
+      const delayTime = 4
 
-    let currentTime = 0
+      let currentTime = 0
 
-    const lastFrameMap = new Map<number, Frame>()
-    const lastFrameDurationMap = new Map<number, [number, number]>() // frameIndex, delayCount>()
-    const paletteMap = new Map<number, number>()
+      const lastFrameMap = new Map<number, Frame>()
+      const lastFrameDurationMap = new Map<number, [number, number]>() // frameIndex, delayCount>()
+      const paletteMap = new Map<number, number>()
 
-    let lastFrameIndexList: (undefined | number)[]
+      let lastFrameIndexList: (undefined | number)[]
 
-    while (currentTime <= duration) {
-      let source = Frame.fromRectangle(width, height, [-1, -1, -1])
+      while (currentTime <= duration) {
+        let source = Frame.fromRectangle(width, height, [-1, -1, -1])
 
-      const frameIndexList = items.map((item) => {
-        const { id, reader, loop, start } = item
-        // TODO (boen): 自定义结束处置方式
-        if (currentTime < start)
-          return undefined
+        const frameIndexList = items.map((item) => {
+          const { id, reader, loop, start } = item
+          // TODO (boen): 自定义结束处置方式
+          if (currentTime < start)
+            return undefined
 
-        let [lastFrameIndex, durationCount] = lastFrameDurationMap.get(id) || [0, reader.frameInfo(0).delay]
+          let [lastFrameIndex, durationCount] = lastFrameDurationMap.get(id) || [0, reader.frameInfo(0).delay]
 
-        const totalFrames = reader.numFrames()
+          const totalFrames = reader.numFrames()
 
-        let frameIndex = lastFrameIndex
+          let frameIndex = lastFrameIndex
 
-        // 上一帧时间不够了，找下一帧
-        if (currentTime > durationCount) {
-          let restTime = currentTime - durationCount
+          // 上一帧时间不够了，找下一帧
+          if (currentTime > durationCount) {
+            let restTime = currentTime - durationCount
 
-          while (restTime > 0) {
-            const nextFrameDuration = reader.frameInfo(++frameIndex % totalFrames).delay
+            while (restTime > 0) {
+              const nextFrameDuration = reader.frameInfo(++frameIndex % totalFrames).delay
 
-            restTime -= nextFrameDuration
-            durationCount += nextFrameDuration
+              restTime -= nextFrameDuration
+              durationCount += nextFrameDuration
+            }
+
+            lastFrameDurationMap.set(id, [frameIndex, durationCount])
           }
 
-          lastFrameDurationMap.set(id, [frameIndex, durationCount])
+          if (loop)
+            frameIndex = frameIndex % totalFrames
+          else
+            frameIndex = Math.min(frameIndex, totalFrames - 1)
+
+          return frameIndex
+        })
+
+        currentTime += delayTime
+
+        if (frameIndexList.every((item, index) => item === lastFrameIndexList?.[index])) {
+          const lastFrameOptions = frames[frames.length - 1]?.[5]
+
+          if (lastFrameOptions) {
+            lastFrameOptions.delay! += delayTime
+            continue
+          }
+        }
+        else {
+          lastFrameIndexList = frameIndexList
         }
 
-        if (loop)
-          frameIndex = frameIndex % totalFrames
-        else
-          frameIndex = Math.min(frameIndex, totalFrames - 1)
+        for (let i = 0; i < items.length; i++) {
+          const frameIndex = frameIndexList[i]
 
-        return frameIndex
-      })
+          if (typeof frameIndex === 'undefined')
+            continue
 
-      currentTime += delayTime
+          const item = items[i]
+          const { id, reader, left, top, scaleX, scaleY, angle } = item
 
-      if (frameIndexList.every((item, index) => item === lastFrameIndexList?.[index])) {
-        const lastFrameOptions = frames[frames.length - 1]?.[5]
+          const { disposal } = reader.frameInfo(frameIndex)
 
-        if (lastFrameOptions) {
-          lastFrameOptions.delay! += delayTime
-          continue
+          const transparentColor = getTransparent(item, frameIndex)
+
+          const frameData = new Uint8ClampedArray(reader.width * reader.height * 4)
+          reader.decodeAndBlitFrameRGBA(frameIndex, frameData)
+
+          source = source.merge(
+            Frame
+              .fromFrameRGBA(frameData, reader.width, reader.height)
+              .exec((frame) => {
+                const lastFrame = lastFrameMap.get(id)
+
+                if (lastFrame)
+                  frame = lastFrame.merge(frame, { transparent: transparentColor })
+
+                switch (disposal) {
+                  case 1:
+                    lastFrameMap.set(id, frame.clone())
+                    break
+                  case 2:
+                    lastFrameMap.delete(id)
+                    break
+                  default:
+                    break
+                }
+
+                return frame
+              })
+              .scale(scaleX, scaleY)
+              .rotateDEG(angle),
+            {
+              x: left,
+              y: top,
+              transparent: transparentColor,
+            },
+          )
+
+          await idle()
         }
-      }
-      else {
-        lastFrameIndexList = frameIndexList
-      }
 
-      for (let i = 0; i < items.length; i++) {
-        const frameIndex = frameIndexList[i]
+        const indexedPixels: number[] = []
 
-        if (typeof frameIndex === 'undefined')
-          continue
+        for (let index = 0; index <= source.data.length; index += 4) {
+          const color = colorNumber([
+            source.data[index],
+            source.data[index + 1],
+            source.data[index + 2],
+          ])
 
-        const item = items[i]
-        const { id, reader, left, top, scaleX, scaleY, angle } = item
+          if (!paletteMap.has(color))
+            paletteMap.set(color, paletteMap.size)
 
-        const { disposal } = reader.frameInfo(frameIndex)
+          indexedPixels.push(paletteMap.get(color)!)
+        }
 
-        const transparentColor = getTransparent(item, frameIndex)
+        const transparentIndex = paletteMap.get(-1)
 
-        const frameData = new Uint8ClampedArray(reader.width * reader.height * 4)
-        reader.decodeAndBlitFrameRGBA(frameIndex, frameData)
+        frames.push([0, 0, source.width, source.height, indexedPixels, {
+          delay: delayTime,
+          transparent: transparentIndex,
+          disposal: 2,
+        }])
 
-        source = source.merge(
-          Frame
-            .fromFrameRGBA(frameData, reader.width, reader.height)
-            .exec((frame) => {
-              const lastFrame = lastFrameMap.get(id)
-
-              if (lastFrame)
-                frame = lastFrame.merge(frame, { transparent: transparentColor })
-
-              switch (disposal) {
-                case 1:
-                  lastFrameMap.set(id, frame.clone())
-                  break
-                case 2:
-                  lastFrameMap.delete(id)
-                  break
-                default:
-                  break
-              }
-
-              return frame
-            })
-            .scale(scaleX, scaleY)
-            .rotateDEG(angle),
-          {
-            x: left,
-            y: top,
-            transparent: transparentColor,
-          },
-        )
+        await idle()
       }
 
-      const indexedPixels: number[] = []
-
-      for (let index = 0; index <= source.data.length; index += 4) {
-        const color = colorNumber([
-          source.data[index],
-          source.data[index + 1],
-          source.data[index + 2],
-        ])
-
-        if (!paletteMap.has(color))
-          paletteMap.set(color, paletteMap.size)
-
-        indexedPixels.push(paletteMap.get(color)!)
-      }
+      const palette = [
+        ...paletteMap.keys(),
+      ].concat(Array(256).fill(0)).slice(0, 256)
 
       const transparentIndex = paletteMap.get(-1)
+      if (typeof transparentIndex !== 'undefined')
 
-      frames.push([0, 0, source.width, source.height, indexedPixels, {
-        delay: delayTime,
-        transparent: transparentIndex,
-        disposal: 2,
-      }])
-    }
+        palette.splice(transparentIndex, 1, 0)
 
-    const palette = [
-      ...paletteMap.keys(),
-    ].concat(Array(256).fill(0)).slice(0, 256)
+      const gifWriter = new GifWriter(imageData, width, height, {
+        palette,
+      })
 
-    const transparentIndex = paletteMap.get(-1)
-    if (typeof transparentIndex !== 'undefined')
+      frames.forEach(params => gifWriter.addFrame(...params))
 
-      palette.splice(transparentIndex, 1, 0)
-
-    const gifWriter = new GifWriter(imageData, width, height, {
-      palette,
+      return Uint8ClampedArray.from(imageData.slice(0, gifWriter.end()))
     })
-
-    frames.forEach(params => gifWriter.addFrame(...params))
-
-    return Uint8ClampedArray.from(imageData.slice(0, gifWriter.end()))
   }
 
   private handleCanvasCreate() {
