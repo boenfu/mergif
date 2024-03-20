@@ -274,13 +274,15 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
         return frameIndex
       })
 
+      currentTime += delayTime
+
       if (frameIndexList.every((item, index) => item === lastFrameIndexList?.[index])) {
         const lastFrameOptions = frames[frames.length - 1]?.[5]
 
-        if (lastFrameOptions)
+        if (lastFrameOptions) {
           lastFrameOptions.delay! += delayTime
-
-        continue
+          continue
+        }
       }
       else {
         lastFrameIndexList = frameIndexList
@@ -356,8 +358,6 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
         transparent: transparentIndex,
         disposal: 2,
       }])
-
-      currentTime += delayTime
     }
 
     const palette = [
