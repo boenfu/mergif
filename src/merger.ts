@@ -237,7 +237,7 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
       const lastFrameMap = new Map<number, Frame>()
       const lastFrameDurationMap = new Map<number, {
         frameIndex: number | undefined
-        delayCount: number
+        durationCount: number
         durationTotalFrames: number
       }>()
       const paletteMap = new Map<number, number>()
@@ -253,9 +253,9 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
           if (currentTime < itemStart)
             return undefined
 
-          let { frameIndex: lastFrameIndex, delayCount: durationCount, durationTotalFrames } = lastFrameDurationMap.get(id) || {
+          let { frameIndex: lastFrameIndex, durationCount, durationTotalFrames } = lastFrameDurationMap.get(id) || {
             frameIndex: 0,
-            delayCount: reader.frameInfo(0).delay,
+            durationCount: reader.frameInfo(0).delay,
             durationTotalFrames: countFrames(reader, itemDuration),
           }
 
@@ -291,7 +291,7 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
 
           lastFrameDurationMap.set(id, {
             frameIndex,
-            delayCount: durationCount,
+            durationCount,
             durationTotalFrames,
           })
 
@@ -448,22 +448,25 @@ function colorNumber(color: number[]): number {
 
 function countDuration(reader: GifReader): number {
   const totalFrames = reader.numFrames()
-  let delayCount = 0
+  let durationCount = 0
 
   for (let i = 0; i < totalFrames; i++)
-    delayCount += reader.frameInfo(i).delay
+    durationCount += reader.frameInfo(i).delay
 
-  return delayCount
+  return durationCount
 }
 
+/**
+ * 统计资源指定时间能覆盖的帧数（可以比资源原时间长，按循环的方式计算）
+ */
 function countFrames(reader: GifReader, duration: number): number {
   const totalFrames = reader.numFrames()
 
-  let delayCount = 0
+  let durationCount = 0
   let frames = 0
 
-  while (delayCount < duration) {
-    delayCount += reader.frameInfo(frames % totalFrames).delay
+  while (durationCount < duration) {
+    durationCount += reader.frameInfo(frames % totalFrames).delay
     frames++
   }
 
