@@ -301,8 +301,6 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
 
           const { disposal } = reader.frameInfo(frameIndex)
 
-          const transparentColor = getTransparent(item, frameIndex)
-
           const frameData = new Uint8ClampedArray(reader.width * reader.height * 4)
           reader.decodeAndBlitFrameRGBA(frameIndex, frameData)
 
@@ -312,8 +310,11 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
               .exec((frame) => {
                 const lastFrame = lastFrameMap.get(id)
 
-                if (lastFrame)
-                  frame = lastFrame.merge(frame, { transparent: transparentColor })
+                if (lastFrame) {
+                  frame = lastFrame.merge(frame, {
+                    isTransparent,
+                  })
+                }
 
                 switch (disposal) {
                   case 1:
@@ -333,7 +334,7 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
             {
               x: left,
               y: top,
-              transparent: transparentColor,
+              isTransparent,
             },
           )
 
@@ -423,20 +424,11 @@ function colorNumber(color: number[]): number {
   return color[0] << 16 | color[1] << 8 | color[2]
 }
 
-function getTransparent(item: GIFMergeItem, frame = 0): [number, number, number] | undefined {
-  const { palette_offset, transparent_index } = item.reader.frameInfo(frame)
-
-  const transparentOffset = (palette_offset ?? 0) + (transparent_index ?? 0) * 3
-
-  return typeof transparent_index === 'number'
-    ? [
-        item.binary[transparentOffset],
-        item.binary[transparentOffset + 1],
-        item.binary[transparentOffset + 2],
-      ]
-    : undefined
-}
-
 function countDuration(reader: GifReader): number {
   return Array(reader.numFrames()).fill(0).reduce((c, _, i) => c + reader.frameInfo(i).delay, 0)
+}
+
+function isTransparent(rgba: number[]): boolean {
+  // no alpha, just 255 or 0
+  return rgba[3] === 0
 }

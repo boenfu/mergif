@@ -115,7 +115,7 @@ export class Frame {
   merge(frame: Frame, params: {
     x?: number
     y?: number
-    transparent?: number[]
+    isTransparent?: (rgba: number[]) => boolean
   } = {}): Frame {
     return Frame.merge({ frame: this }, { frame, ...params })
   }
@@ -161,12 +161,12 @@ export class Frame {
     frame: Frame
     x?: number
     y?: number
-    transparent?: number[]
+    isTransparent?: (rgba: number[]) => boolean
   }[]]) {
     const { width: sourceWidth, height: sourceHeight, data: _sourceData } = source.frame.apply()
     const sourceData = [..._sourceData]
 
-    for (let { frame, x = 0, y = 0, transparent } of frames) {
+    for (let { frame, x = 0, y = 0, isTransparent } of frames) {
       x = Math.round(x)
       y = Math.round(y)
 
@@ -182,7 +182,7 @@ export class Frame {
           const index = (offset + j * sourceWidth + i) * 4
           const rgba = getRGBA({ width, height, data }, j, i)
 
-          if (transparent && isEqual(rgba, transparent))
+          if (isTransparent?.(rgba))
             continue
 
           sourceData[index] = rgba[0]
@@ -195,10 +195,6 @@ export class Frame {
 
     return new Frame(sourceData, sourceWidth, sourceHeight)
   }
-}
-
-function isEqual(c1: number[], c2: number[]) {
-  return c1[0] === c2[0] && c1[1] === c2[1] && c1[2] === c2[2]
 }
 
 function getRGBA({ data, width, height }: {
