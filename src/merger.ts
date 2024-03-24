@@ -28,11 +28,12 @@ export interface GIFMergeItem {
    */
   duration: number
   /**
-   * 自身播放完成后是否循环
-   * true: 循环
-   * false: 停在最后一帧
+   * 播放模式 (default: hidden)
+   * loop: 循环
+   * forwards: 停在最后一帧
+   * hidden: 隐藏
    */
-  loop: boolean
+  playMode?: 'loop' | 'forwards' | 'hidden'
   reader: GifReader
   visible: boolean
 }
@@ -101,7 +102,7 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
         reader,
         start: 0,
         duration: countDuration(reader),
-        loop: false,
+        playMode: 'hidden',
         visible: true,
         ...item,
       })
@@ -234,7 +235,11 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
       let currentTime = 0
 
       const lastFrameMap = new Map<number, Frame>()
-      const lastFrameDurationMap = new Map<number, [number, number]>() // frameIndex, delayCount>()
+      const lastFrameDurationMap = new Map<number, {
+        frameIndex: number | undefined
+        delayCount: number
+        durationTotalFrames: number
+      }>()
       const paletteMap = new Map<number, number>()
 
       let lastFrameIndexList: (undefined | number)[]
@@ -243,35 +248,52 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
         let source = Frame.fromRectangle(width, height, [-1, -1, -1])
 
         const frameIndexList = items.map((item) => {
-          const { id, reader, loop, start } = item
-          // TODO (boen): 自定义结束处置方式
-          if (currentTime < start)
+          const { id, reader, playMode, start: itemStart, duration: itemDuration } = item
+
+          if (currentTime < itemStart)
             return undefined
 
-          let [lastFrameIndex, durationCount] = lastFrameDurationMap.get(id) || [0, reader.frameInfo(0).delay]
+          let { frameIndex: lastFrameIndex, delayCount: durationCount, durationTotalFrames } = lastFrameDurationMap.get(id) || {
+            frameIndex: 0,
+            delayCount: reader.frameInfo(0).delay,
+            durationTotalFrames: countFrames(reader, itemDuration),
+          }
+
+          if (currentTime >= (itemStart + itemDuration)) {
+            switch (playMode) {
+              case 'forwards':
+                return lastFrameIndex
+              case 'hidden':
+                return undefined
+              case 'loop':
+              default:
+                // 继续执行
+                break
+            }
+          }
 
           const totalFrames = reader.numFrames()
 
-          let frameIndex = lastFrameIndex
+          let frameIndex: number | undefined = lastFrameIndex ?? 0
 
-          // 上一帧时间不够了，找下一帧
+          // 上一帧持续时间无法覆盖当前时间了，找下一帧
           if (currentTime > durationCount) {
             let restTime = currentTime - durationCount
 
             while (restTime > 0) {
-              const nextFrameDuration = reader.frameInfo(++frameIndex % totalFrames).delay
+              frameIndex = ((++frameIndex) % durationTotalFrames) % totalFrames
+              const nextFrameDuration = reader.frameInfo(frameIndex).delay
 
               restTime -= nextFrameDuration
               durationCount += nextFrameDuration
             }
-
-            lastFrameDurationMap.set(id, [frameIndex, durationCount])
           }
 
-          if (loop)
-            frameIndex = frameIndex % totalFrames
-          else
-            frameIndex = Math.min(frameIndex, totalFrames - 1)
+          lastFrameDurationMap.set(id, {
+            frameIndex,
+            delayCount: durationCount,
+            durationTotalFrames,
+          })
 
           return frameIndex
         })
@@ -372,8 +394,8 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
       ].concat(Array(256).fill(0)).slice(0, 256)
 
       const transparentIndex = paletteMap.get(-1)
-      if (typeof transparentIndex !== 'undefined')
 
+      if (typeof transparentIndex !== 'undefined')
         palette.splice(transparentIndex, 1, 0)
 
       const gifWriter = new GifWriter(imageData, width, height, {
@@ -425,7 +447,27 @@ function colorNumber(color: number[]): number {
 }
 
 function countDuration(reader: GifReader): number {
-  return Array(reader.numFrames()).fill(0).reduce((c, _, i) => c + reader.frameInfo(i).delay, 0)
+  const totalFrames = reader.numFrames()
+  let delayCount = 0
+
+  for (let i = 0; i < totalFrames; i++)
+    delayCount += reader.frameInfo(i).delay
+
+  return delayCount
+}
+
+function countFrames(reader: GifReader, duration: number): number {
+  const totalFrames = reader.numFrames()
+
+  let delayCount = 0
+  let frames = 0
+
+  while (delayCount < duration) {
+    delayCount += reader.frameInfo(frames % totalFrames).delay
+    frames++
+  }
+
+  return frames
 }
 
 function isTransparent(rgba: number[]): boolean {
