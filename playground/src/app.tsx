@@ -14,6 +14,7 @@ import {
   ReloadIcon,
   SunIcon,
   TrashIcon,
+  UpdateIcon,
 } from '@radix-ui/react-icons'
 import { rgbString } from '@boenfu/text-rgb'
 import { useEffect, useId, useReducer, useRef, useState } from 'react'
@@ -36,6 +37,7 @@ export function App() {
   const [_, rerender] = useReducer<any>(() => ({}), {})
   const [colorScheme, setColorScheme] = usePreferredColorScheme()
 
+  const [downloading, setDownloading] = useState(false)
   const [totalDuration, setTotalDuration] = useState(0)
 
   const canvasReady = Boolean(canvas)
@@ -242,18 +244,40 @@ export function App() {
                 })
               }}
             />
-            <Button
-              variant="soft"
-              disabled={!merger.items.filter(item => item.visible).length}
-              onClick={() => {
-                merger.generateGIF().then(gif =>
-                  gif && fileDownload(gif, `${new Date().toLocaleString()}.gif`),
-                )
-              }}
-            >
-              <DownloadIcon />
-              Download
-            </Button>
+            {
+              downloading
+                ? (
+                  <Button
+                    variant="soft"
+                    disabled={true}
+
+                  >
+                    <UpdateIcon style={{
+                      animation: 'rotate 2s linear infinite',
+                    }}
+                    />
+                    Downloading
+                  </Button>
+                  )
+                : (
+                  <Button
+                    variant="soft"
+                    disabled={!merger.items.filter(item => item.visible).length}
+                    onClick={() => {
+                      setDownloading(true)
+                      merger.generateGIF().then(gif =>
+                        gif && fileDownload(gif, `${new Date().toLocaleString()}.gif`),
+                      ).catch(alert).finally(() => {
+                        setDownloading(false)
+                      })
+                    }}
+                  >
+                    <DownloadIcon />
+                    Download
+                  </Button>
+                  )
+            }
+
             {
               (import.meta.env.DEV && localStorage.getItem('DEV'))
               && (
