@@ -245,7 +245,7 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
       let lastFrameIndexList: (undefined | number)[]
 
       while (currentTime <= duration) {
-        let source = Frame.fromRectangle(width, height, [-1, -1, -1])
+        let source = Frame.fromRectangle(width, height)
 
         const frameIndexList = items.map((item) => {
           const { id, reader, playMode, start: itemStart, duration: itemDuration } = item
@@ -366,11 +366,24 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
         const indexedPixels: number[] = []
 
         for (let index = 0; index <= source.data.length; index += 4) {
-          const color = colorNumber([
+          const [r, g, b, a] = [
             source.data[index],
             source.data[index + 1],
             source.data[index + 2],
-          ])
+            source.data[index + 3],
+          ]
+          let color: number
+
+          if (a === 0) {
+            color = -1
+          }
+          else {
+            color = colorNumber([
+              r,
+              g,
+              b,
+            ])
+          }
 
           if (!paletteMap.has(color))
             paletteMap.set(color, paletteMap.size)
