@@ -102,7 +102,7 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
         reader,
         start: 0,
         duration: countDuration(reader),
-        playMode: 'hidden',
+        playMode: 'forwards',
         visible: true,
         ...item,
       })
@@ -240,7 +240,7 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
         durationCount: number
         durationTotalFrames: number
       }>()
-      const paletteMap = new Map<number, number>()
+      const paletteMap = new Map<number, number>([[-1, 0]])
 
       let lastFrameIndexList: (undefined | number)[]
 
@@ -402,14 +402,16 @@ export class GIFMerger extends EventEmitter<GIFMergerEvents> {
         await idle()
       }
 
-      const palette = [
+      let palette = [
         ...paletteMap.keys(),
-      ].concat(Array(256).fill(0)).slice(0, 256)
+      ].concat(Array(256).fill(0))
 
       const transparentIndex = paletteMap.get(-1)
 
       if (typeof transparentIndex !== 'undefined')
         palette.splice(transparentIndex, 1, 0)
+
+      palette = palette.slice(0, 256)
 
       const gifWriter = new GifWriter(imageData, width, height, {
         palette,
